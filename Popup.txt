@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# --- CONFIGURATION ---
+LOG="$HOME/.kismet/kismet_alerts.log"
+EMAIL_TO="admin@exemple.com"
+EMAIL_FROM="votre_email@gmail.com"
+SMTP_SERVER="smtp.gmail.com:587"
+SMTP_USER="votre_email@gmail.com"
+SMTP_PASS="votre_mot_de_passe_application"
+HOSTNAME=$(hostname)
+
+# Seuil d'alerte
+THRESHOLD=10
+# --- --- --- --- ---
+
+# On utilise un tableau associatif pour compter les attaques par adresse MAC
+declare -A counter
+
+echo "Surveillance des logs Kismet lancée..."
+
+tail -Fn0 "$LOG" | grep --line-buffered "DEAUTHFLOOD" | while read -r line
+do
+  # Extraction de la MAC source
+  SRC_MAC=$(echo "$line" | grep -oE 'src=[0-9A-Fa-f:]{17}' | cut -d= -f2)
+  
+  if [ -n "$SRC_MAC" ]; then
+    # Incrémentation du compteur pour cette MAC
+    ((counter["$SRC_MAC"]++))
+    echo "[DEBUG] Deauth de $SRC_MAC détectée (${counter["$SRC_MAC"]}/$THRESHOLD)"
+
+    # Vérification du seuil
+    if [ "${counter["$SRC_MAC"]}" -eq "$THRESHOLD" ]; then
+      
+      TITLE="⚠️ ALERTE WIFI - Deauth Flood"
+      MSG="Seuil de $THRESHOLD paquets atteint !
+Source MAC : $SRC_MAC
+Machine IDS : $HOSTNAME
+Date : $(date)
+
+Détail du log :
+$line"
+
+      # 1. Pop-up graphique
+      notify-send -u critical "$TITLE" "$MSG"
+
+      # 2. Envoi du mail via sendemail
+      sendemail -f "$EMAIL_FROM" \
+                -t "$EMAIL_TO" \
+                -u "$TITLE" \
+                -m "$MSG" \
+                -s "$SMTP_SERVER" \
+                -xu "$SMTP_USER" \
+                -xp "$SMTP_PASS" \
+                -o tls=yes \
+                -q # Mode silencieux
+
+      echo "Alerte envoyée pour $SRC_MAC"
+      
+      # Optionnel : réinitialiser le compteur après l'alerte pour pouvoir en recevoir une nouvelle plus tard
+      # counter["$SRC_MAC"]=0
+    fi
+  fi
+done
