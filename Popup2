@@ -1,0 +1,27 @@
+#!/bin/bash
+
+LOG="$HOME/.kismet/kismet_alerts.log"
+THRESHOLD=10
+HOSTNAME=$(hostname)
+
+declare -A counter
+
+echo "Surveillance des logs Kismet lancée..."
+
+while read -r line
+do
+  SRC_MAC=$(echo "$line" | grep -oE 'src=[0-9A-Fa-f:]{17}' | cut -d= -f2)
+
+  if [[ -n "$SRC_MAC" ]]; then
+    ((counter["$SRC_MAC"]++))
+
+    echo "[DEBUG] Deauth de $SRC_MAC (${counter["$SRC_MAC"]}/$THRESHOLD)"
+
+    if [[ ${counter["$SRC_MAC"]} -eq $THRESHOLD ]]; then
+      notify-send -u critical "⚠️ Alerte WiFi" \
+      "Deauth flood détecté depuis $SRC_MAC"
+
+      echo "Alerte envoyée pour $SRC_MAC"
+    fi
+  fi
+done < <(tail -Fn0 "$LOG" | grep --line-buffered "DEAUTHFLOOD")
