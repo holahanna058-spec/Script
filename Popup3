@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# --- CONFIGURATION ---
+LOG="$HOME/.kismet/kismet_alerts.log"
+EMAIL_TO="fatim@gmail.com"
+EMAIL_FROM="fatim@gmail.com"
+SMTP_SERVER="smtp.gmail.com:587"
+SMTP_USER="fatim@gmail.com"
+SMTP_PASS="iflrggejxzjbmeerhj" # Note: Utilisez un "Mot de passe d'application" Gmail
+HOSTNAME=$(hostname)
+THRESHOLD=10
+
+# Tableau associatif pour compter les attaques
+declare -A counter
+
+echo "Surveillance des logs Kismet lancée sur $LOG..."
+
+# Utilisation d'une substitution de processus < <(...) pour garder les variables actives
+while read -r line
+do
+  # Extraction de la MAC source (plus robuste)
+  SRC_MAC=$(echo "$line" | grep -oP 'src=\K[0-9A-Fa-f:]{17}')
+  
+  if [ -n "$SRC_MAC" ]; then
+    ((counter["$SRC_MAC"]++))
+
+    echo "[$(date +%T)] [DEBUG] Deauth de $SRC_MAC (${counter["$SRC_MAC"]}/$THRESHOLD)"
+
+    if [ "${counter["$SRC_MAC"]}" -ge "$THRESHOLD" ]; then
+      
+      TITLE="⚠️ ALERTE WIFI - Deauth Flood"
+      MSG="Attaque Deauth détectée !
+MAC source : $SRC_MAC
+Seuil atteint : ${counter["$SRC_MAC"]} paquets
+Machine IDS : $HOSTNAME
+Lien de blocage : http://192.168.1.1
+
+Détails : $line"
+
+      # 1. Notification Bureau (S'assurer que DBUS_SESSION_BUS_ADDRESS est dispo si lancé via SSH)
+      notify-send -u critical "$TITLE" "$MSG" 2>/dev/null
+
+      # 2. Envoi du mail
+      sendemail -f "$EMAIL_FROM" \
+                -t "$EMAIL_TO" \
+                -u "$TITLE" \
+                -m "$MSG" \
+                -s "$SMTP_SERVER" \
+                -xu "$SMTP_USER" \
+                -xp "$SMTP_PASS" \
+                -o tls=yes -q
+
+      echo "Alerte envoyée pour $SRC_MAC"
+      
+      # On réinitialise pour ne pas spammer d'emails à chaque nouveau paquet après 10
+      counter["$SRC_MAC"]=0
+    fi
+  fi
+done < <(tail -Fn0 "$LOG" | grep --line-buffered "DEAUTHFLOOD")
